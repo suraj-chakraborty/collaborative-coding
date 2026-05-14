@@ -46,7 +46,9 @@ export async function createQuestion(data: {
                 isApproved: (data as any).isAiGenerated ? false : true,
                 canonicalSolution: data.canonicalSolution,
                 optimalTimeComplexity: data.optimalTimeComplexity,
-                optimalSpaceComplexity: data.optimalSpaceComplexity
+                optimalSpaceComplexity: data.optimalSpaceComplexity,
+                isPractice: (data as any).isPractice || false,
+                publishedAt: (data as any).publishedAt || null,
             }
         })
         return { success: true, question }
@@ -73,7 +75,9 @@ export async function updateQuestion(id: number, data: {
             where: { id },
             data: {
                 ...data,
-                difficulty: data.difficulty ? (data.difficulty as any) : undefined
+                difficulty: data.difficulty ? (data.difficulty as any) : undefined,
+                isPractice: (data as any).isPractice !== undefined ? (data as any).isPractice : undefined,
+                publishedAt: (data as any).publishedAt !== undefined ? (data as any).publishedAt : undefined,
             }
         });
         return { success: true, question };

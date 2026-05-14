@@ -31,6 +31,8 @@ interface Question {
   tags: string[];
   isApproved: boolean;
   isAiGenerated: boolean;
+  isPractice: boolean;
+  publishedAt: string | null;
   createdAt: string;
 }
 
@@ -149,7 +151,12 @@ export const QuestionManager: React.FC = () => {
       setDifficulty(question.difficulty);
       setConstraints(question.constraints || '');
       setTags(question.tags.join(', '));
-      if (question.testCases) setTestCases(question.testCases);
+      if (question.testCases) {
+        setTestCases(question.testCases.map((tc: any) => ({
+          input: String(tc.input || ''),
+          expectedOutput: String(tc.expectedOutput || tc.output || '')
+        })));
+      }
 
       // Populate new canonical fields if AI provided them
       if (question.canonicalSolution) setCanonicalSolution(question.canonicalSolution);
@@ -166,7 +173,7 @@ export const QuestionManager: React.FC = () => {
   };
 
   const handleUpsertQuestion = async (): Promise<void> => {
-    if (!title.trim() || !description.trim() || testCases.some(tc => !tc.input.trim() || !tc.expectedOutput.trim())) {
+    if (!(title || '').trim() || !(description || '').trim() || testCases.some(tc => !(tc.input || '').toString().trim() || !(tc.expectedOutput || (tc as any).output || '').toString().trim())) {
       toast.error('Please fill in all required fields and test cases');
       return;
     }
@@ -338,6 +345,7 @@ export const QuestionManager: React.FC = () => {
                     <TableHead>Title</TableHead>
                     <TableHead>Difficulty</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Practice Mode</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -345,60 +353,80 @@ export const QuestionManager: React.FC = () => {
                 <TableBody>
                   {isFetching ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-10">
+                      <TableCell colSpan={6} className="text-center py-10">
                         <Loader2 className="h-8 w-8 animate-spin mx-auto text-purple-500" />
                         <p className="mt-2 text-muted-foreground">Fetching questions...</p>
                       </TableCell>
                     </TableRow>
                   ) : questions.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
                         No questions found.
                       </TableCell>
                     </TableRow>
                   ) : questions.map((q) => (
                     <TableRow key={q.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col">
-                          <span>{q.title}</span>
-                          <div className="flex gap-1 mt-1">
-                            {q.isAiGenerated && (
-                              <Badge variant="outline" className="text-[10px] py-0 border-purple-200 text-purple-600">
-                                AI Generated
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={q.difficulty === 'Easy' ? 'secondary' : q.difficulty === 'Medium' ? 'default' : 'destructive'} className="text-[10px]">
-                          {q.difficulty}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {q.isApproved ? (
-                          <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200 text-[10px]">Approved</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-orange-600 border-orange-200 text-[10px]">Pending</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(q.createdAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(q)}>
-                            <Edit2 className="h-4 w-4 text-blue-500" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowTranslations(true)}>
-                            <Globe className="h-4 w-4 text-purple-500" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(q.id)}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                       <TableCell className="font-medium">
+                         <div className="flex flex-col">
+                           <span>{q.title}</span>
+                           <div className="flex gap-1 mt-1">
+                             {q.isAiGenerated && (
+                               <Badge variant="outline" className="text-[10px] py-0 border-purple-200 text-purple-600">
+                                 AI Generated
+                               </Badge>
+                             )}
+                           </div>
+                         </div>
+                       </TableCell>
+                       <TableCell>
+                         <Badge variant={q.difficulty === 'Easy' ? 'secondary' : q.difficulty === 'Medium' ? 'default' : 'destructive'} className="text-[10px]">
+                           {q.difficulty}
+                         </Badge>
+                       </TableCell>
+                       <TableCell>
+                         {q.isApproved ? (
+                           <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200 text-[10px]">Approved</Badge>
+                         ) : (
+                           <Badge variant="outline" className="text-orange-600 border-orange-200 text-[10px]">Pending</Badge>
+                         )}
+                       </TableCell>
+                       <TableCell>
+                         {q.isPractice ? (
+                           <div className="flex flex-col gap-1">
+                             <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px] w-fit">
+                               ✓ Active
+                             </Badge>
+                             {q.publishedAt ? (
+                               <span className="text-[10px] text-muted-foreground">
+                                 {new Date(q.publishedAt) > new Date()
+                                   ? `⏰ Scheduled: ${new Date(q.publishedAt).toLocaleString()}`
+                                   : `Live since ${new Date(q.publishedAt).toLocaleDateString()}`}
+                               </span>
+                             ) : (
+                               <span className="text-[10px] text-muted-foreground">Visible immediately</span>
+                             )}
+                           </div>
+                         ) : (
+                           <Badge variant="outline" className="text-muted-foreground text-[10px]">Off</Badge>
+                         )}
+                       </TableCell>
+                       <TableCell className="text-xs text-muted-foreground">
+                         {new Date(q.createdAt).toLocaleDateString()}
+                       </TableCell>
+                       <TableCell className="text-right">
+                         <div className="flex justify-end gap-2">
+                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(q)}>
+                             <Edit2 className="h-4 w-4 text-blue-500" />
+                           </Button>
+                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowTranslations(true)}>
+                             <Globe className="h-4 w-4 text-purple-500" />
+                           </Button>
+                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(q.id)}>
+                             <Trash2 className="h-4 w-4 text-red-500" />
+                           </Button>
+                         </div>
+                       </TableCell>
+                     </TableRow>
                   ))}
                 </TableBody>
               </Table>

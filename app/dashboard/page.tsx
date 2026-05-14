@@ -200,8 +200,14 @@ export default function DashboardPage() {
 
     useEffect(() => {
         const tab = searchParams.get('tab');
+        const qId = searchParams.get('questionId');
+        
         if (tab) {
             setActiveTab(tab);
+        }
+        
+        if (tab === 'practice' && qId) {
+            setSelectedPracticeQuestion(Number(qId));
         }
     }, [searchParams]);
 
@@ -215,7 +221,8 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (status === 'unauthenticated') {
-            router.push('/auth/signin');
+            const currentUrl = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/dashboard';
+            router.push('/auth/signin?callbackUrl=' + encodeURIComponent(currentUrl));
         }
     }, [status, router]);
 
