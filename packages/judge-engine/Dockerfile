@@ -11,7 +11,7 @@ RUN apk add --no-cache python3 py3-pip openjdk17
 COPY package*.json ./
 RUN npm install --production
 
-# Copy execution scripts
+# Copy source files
 COPY src/ ./src/
 
 # Create isolated execution directory
