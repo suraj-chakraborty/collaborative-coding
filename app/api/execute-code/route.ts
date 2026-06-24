@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import vm from 'vm';
-
-export const maxDuration = 30;
+import { execSync } from 'child_process';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+import { randomUUID } from 'crypto';export const maxDuration = 30;
 
 interface TestCase {
   input: string;
@@ -140,12 +143,40 @@ function runTestCase(code: string, tc: TestCase): TestResult {
       args = [inputStr];
     }
 
-    // Call the function
-    const callSandbox: Record<string, unknown> = { ...sandbox, __args: args, __fn: fn, __result: undefined };
-    vm.createContext(callSandbox);
-    vm.runInContext('__result = __fn(...__args);', callSandbox, { timeout: 5000 });
+    // Check if it's a class sequence like LRUCache
+    const isClassSequence = Array.isArray(args[0]) && Array.isArray(args[1]) && 
+                            args[0].length === args[1].length &&
+                            typeof args[0][0] === 'string' &&
+                            (typeof sandbox[args[0][0]] === 'function' || typeof sandbox[args[0][0]] === 'object');
+    
+    let resultVal: any;
+    if (isClassSequence) {
+        const commands = args[0] as string[];
+        const params = args[1] as any[][];
+        const classResults: any[] = [];
+        let instance: any = null;
 
-    const resultVal = callSandbox.__result;
+        for (let i = 0; i < commands.length; i++) {
+            const cmd = commands[i];
+            const p = params[i];
+            if (i === 0) {
+                const cls = sandbox[cmd] as any;
+                try { instance = new cls(...p); } catch { instance = cls(...p); }
+                classResults.push(null);
+            } else {
+                const res = instance[cmd].apply(instance, p);
+                classResults.push(res === undefined ? null : res);
+            }
+        }
+        resultVal = classResults;
+    } else {
+        // Call the function
+        const callSandbox: Record<string, unknown> = { ...sandbox, __args: args, __fn: fn, __result: undefined };
+        vm.createContext(callSandbox);
+        vm.runInContext('__result = __fn(...__args);', callSandbox, { timeout: 5000 });
+        resultVal = callSandbox.__result;
+    }
+
     const actual = safeStringify(resultVal).trim();
 
     // Flexible comparison: normalize both sides
@@ -159,6 +190,118 @@ function runTestCase(code: string, tc: TestCase): TestResult {
     return {
       passed: false, input: inputStr, expected: rawExpected, actual: null,
       error: msg.includes('timed out') ? 'Time Limit Exceeded (5s)' : msg,
+      time: Date.now() - start,
+    };
+  }
+}
+
+function runPythonTestCase(code: string, tc: TestCase): TestResult {
+  const rawExpected = String(tc.expectedOutput ?? tc.output ?? '').trim();
+  const inputStr = String(tc.input ?? '').trim();
+  const start = Date.now();
+
+  const runnerCode = `
+import sys, json, time
+from typing import List, Dict, Optional, Tuple, Set, Any, Union
+from collections import defaultdict, OrderedDict, Counter, deque
+
+# User code
+${code}
+
+input_str = sys.argv[1]
+
+try:
+    args = json.loads(input_str)
+    if isinstance(args, list) and len(args) == 2 and isinstance(args[0], list) and isinstance(args[1], list):
+        commands, params = args
+        if len(commands) > 0 and commands[0] in globals():
+            cls = globals()[commands[0]]
+            instance = None
+            results = []
+            for cmd, p in zip(commands, params):
+                if not instance:
+                    instance = cls(*p)
+                    results.append(None)
+                else:
+                    method = getattr(instance, cmd)
+                    res = method(*p)
+                    results.append(res)
+            print(json.dumps(results))
+            sys.exit(0)
+except Exception:
+    pass
+
+try:
+    parsed_input = eval(input_str)
+    if isinstance(parsed_input, tuple):
+        args = list(parsed_input)
+    else:
+        args = [parsed_input]
+except Exception:
+    try:
+        args = json.loads("[" + input_str + "]")
+    except Exception:
+        args = [input_str]
+
+func = None
+for name in ['solution', 'solve', 'main', 'twoSum', 'isPalindrome', 'lengthOfLongestSubstring', 'isValid', 'maxSubArray', 'merge']:
+    if name in globals() and callable(globals()[name]):
+        func = globals()[name]
+        break
+
+if not func and 'Solution' in globals():
+    sol = globals()['Solution']()
+    methods = [m for m in dir(sol) if not m.startswith('_') and callable(getattr(sol, m))]
+    if methods:
+        target_method = methods[0]
+        for m in methods:
+            if m in ['twoSum', 'isPalindrome', 'lengthOfLongestSubstring', 'isValid', 'maxSubArray', 'merge', 'solve']:
+                target_method = m
+                break
+        res = getattr(sol, target_method)(*args)
+        print(json.dumps(res))
+        sys.exit(0)
+
+if not func:
+    _skip = {'json', 'sys', 'time', 'List', 'Dict', 'Optional', 'Tuple', 'Set', 'Any', 'Union',
+             'defaultdict', 'OrderedDict', 'Counter', 'deque', 'list', 'dict', 'set', 'tuple',
+             'int', 'str', 'float', 'bool', 'type', 'print', 'len', 'range', 'enumerate',
+             'zip', 'map', 'filter', 'sorted', 'reversed', 'min', 'max', 'sum', 'abs', 'round',
+             'isinstance', 'issubclass', 'hasattr', 'getattr', 'setattr', 'super', 'property',
+             'staticmethod', 'classmethod', 'object', 'eval', 'exec', 'open', 'input', 'hash',
+             'id', 'iter', 'next', 'repr', 'format', 'chr', 'ord', 'hex', 'oct', 'bin', 'pow',
+             'divmod', 'all', 'any', 'callable', 'dir', 'vars', 'globals', 'locals', 'breakpoint',
+             'Solution'}
+    for k, v in list(globals().items()):
+        if callable(v) and not k.startswith('_') and k not in _skip:
+            func = v
+            break
+
+if func:
+    res = func(*args)
+    print(json.dumps(res))
+else:
+    print("Error: No function found", file=sys.stderr)
+    sys.exit(1)
+`;
+
+  try {
+    const tmpFile = path.join(os.tmpdir(), `runner_${randomUUID()}.py`);
+    fs.writeFileSync(tmpFile, runnerCode);
+    const output = execSync(`python "${tmpFile}" ${JSON.stringify(inputStr)}`, { encoding: 'utf-8', timeout: 5000 });
+    try { fs.unlinkSync(tmpFile); } catch (e) {}
+    
+    const actual = output.trim();
+    const passed = normalizeForComparison(actual) === normalizeForComparison(rawExpected);
+    return { passed, input: inputStr, expected: rawExpected, actual, error: null, time: Date.now() - start };
+  } catch (err: any) {
+    let errorMsg = err.stderr ? err.stderr.toString() : err.message;
+    if (errorMsg.includes('timed out') || err.code === 'ETIMEDOUT') {
+        errorMsg = 'Time Limit Exceeded (5s)';
+    }
+    return {
+      passed: false, input: inputStr, expected: rawExpected, actual: null,
+      error: errorMsg,
       time: Date.now() - start,
     };
   }
@@ -181,9 +324,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'testCases are required' }, { status: 400 });
     }
 
-    if (language && !['javascript', 'typescript', 'js', 'ts'].includes(language)) {
+    if (language && !['javascript', 'typescript', 'js', 'ts', 'python', 'python3', 'py'].includes(language)) {
       return NextResponse.json(
-        { error: `Language "${language}" is not supported for execution. Only JavaScript/TypeScript is supported.` },
+        { error: `Language "${language}" is not supported for execution. Only JavaScript/TypeScript and Python are supported.` },
         { status: 400 }
       );
     }
@@ -197,7 +340,8 @@ export async function POST(request: NextRequest) {
     console.log('[execute-code] Running', testCases.length, 'test cases');
     console.log('[execute-code] First test case:', JSON.stringify(testCases[0]));
 
-    const results: TestResult[] = testCases.map((tc) => runTestCase(code, tc));
+    const isPython = ['python', 'python3', 'py'].includes(language || '');
+    const results: TestResult[] = testCases.map((tc) => isPython ? runPythonTestCase(code, tc) : runTestCase(code, tc));
 
     const passedCount = results.filter((r) => r.passed).length;
     const totalCount = results.length;

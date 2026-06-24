@@ -1,3 +1,5 @@
+import "../../components/practice/practice.css";
+
 export default function DashboardLayout({
     children,
 }: {
